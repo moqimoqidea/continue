@@ -115,12 +115,15 @@ const targetToLanceDb = {
     return;
   }
 
+  const pkgPath = execSync('which pkg', { encoding: 'utf8' }).trim();
+  console.log(`[info] Using pkg at ${pkgPath}`);
+
   console.log("[info] Building binaries with pkg...");
   for (const target of targets) {
     const targetDir = `bin/${target}`;
     console.log(`[info] Building ${target}...`);
     execSync(
-      `npx pkg --no-bytecode --public-packages "*" --public pkgJson/${target} --out-path ${targetDir}`,
+      `${pkgPath} --no-bytecode --public-packages "*" --public pkgJson/${target} --out-path ${targetDir}`
     );
 
     // Download and unzip prebuilt sqlite3 binary for the target
