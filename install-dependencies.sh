@@ -4,6 +4,13 @@
 # - Run Task -> Install Dependencies
 # - Debug -> Extension
 set -e
+
+# Print Node.js and npm versions
+echo "Node.js version:"
+node -v
+echo "npm version:"
+npm -v
+
 echo "Installing Core extension dependencies..."
 pushd core
 npm install
