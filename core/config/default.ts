@@ -3,34 +3,10 @@ import { SerializedContinueConfig } from "..";
 export const defaultConfig: SerializedContinueConfig = {
   models: [
     {
-      title: "GPT-4 Vision (Free Trial)",
-      provider: "free-trial",
-      model: "gpt-4-vision-preview",
-    },
-    {
-      title: "GPT-3.5-Turbo (Free Trial)",
-      provider: "free-trial",
-      model: "gpt-3.5-turbo",
-    },
-    {
-      title: "Gemini Pro (Free Trial)",
-      provider: "free-trial",
-      model: "gemini-pro",
-    },
-    {
-      title: "Codellama 70b (Free Trial)",
-      provider: "free-trial",
-      model: "codellama-70b",
-    },
-    {
-      title: "Mixtral (Free Trial)",
-      provider: "free-trial",
-      model: "mistral-8x7b",
-    },
-    {
-      title: "Claude 3 Sonnet (Free Trial)",
-      provider: "free-trial",
-      model: "claude-3-sonnet-20240229",
+      "title": "Ollama",
+      "provider": "ollama",
+      "model": "qwen:0.5b",
+      "completionOptions": {}
     },
   ],
   slashCommands: [
@@ -79,34 +55,10 @@ export const defaultConfig: SerializedContinueConfig = {
 export const defaultConfigJetBrains: SerializedContinueConfig = {
   models: [
     {
-      title: "GPT-4 Vision (Free Trial)",
-      provider: "free-trial",
-      model: "gpt-4-vision-preview",
-    },
-    {
-      title: "GPT-3.5-Turbo (Free Trial)",
-      provider: "free-trial",
-      model: "gpt-3.5-turbo",
-    },
-    {
-      title: "Gemini Pro (Free Trial)",
-      provider: "free-trial",
-      model: "gemini-pro",
-    },
-    {
-      title: "Codellama 70b (Free Trial)",
-      provider: "free-trial",
-      model: "codellama-70b",
-    },
-    {
-      title: "Mixtral (Free Trial)",
-      provider: "free-trial",
-      model: "mistral-8x7b",
-    },
-    {
-      title: "Claude 3 Sonnet (Free Trial)",
-      provider: "free-trial",
-      model: "claude-3-sonnet-20240229",
+      "title": "Ollama",
+      "provider": "ollama",
+      "model": "qwen:0.5b",
+      "completionOptions": {}
     },
   ],
   slashCommands: [
