@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/naming-convention */
+import type { AutocompleteInput } from "../autocomplete/completionProvider.js";
+import { ProfileDescription } from "../config/ConfigHandler.js";
 import type {
   BrowserSerializedContinueConfig,
   ChatMessage,
@@ -13,8 +16,7 @@ import type {
   SerializedContinueConfig,
   SessionInfo,
   SiteIndexingConfig,
-} from "..";
-import type { AutocompleteInput } from "../autocomplete/completionProvider";
+} from "../index.js";
 
 export type ProtocolGeneratorType<T> = AsyncGenerator<{
   done?: boolean;
@@ -47,9 +49,13 @@ export type ToCoreFromIdeOrWebviewProtocol = {
   ];
   "config/newPromptFile": [undefined, void];
   "config/ideSettingsUpdate": [IdeSettings, void];
-  "config/getBrowserSerialized": [undefined, BrowserSerializedContinueConfig];
+  "config/getSerializedProfileInfo": [
+    undefined,
+    { config: BrowserSerializedContinueConfig; profileId: string },
+  ];
   "config/deleteModel": [{ title: string }, void];
   "config/reload": [undefined, BrowserSerializedContinueConfig];
+  "config/listProfiles": [undefined, ProfileDescription[]];
   "context/getContextItems": [
     {
       name: string;
@@ -62,6 +68,8 @@ export type ToCoreFromIdeOrWebviewProtocol = {
   "context/loadSubmenuItems": [{ title: string }, ContextSubmenuItem[]];
   "autocomplete/complete": [AutocompleteInput, string[]];
   "context/addDocs": [SiteIndexingConfig, void];
+  "context/removeDocs": [Pick<SiteIndexingConfig, "startUrl">, void];
+  "context/indexDocs": [{ reIndex: boolean }, void];
   "autocomplete/cancel": [undefined, void];
   "autocomplete/accept": [{ completionId: string }, void];
   "command/run": [
@@ -131,11 +139,14 @@ export type ToCoreFromIdeOrWebviewProtocol = {
         | "apiKeys"
         | "custom"
         | "freeTrial"
-        | "localExistingUser"
-        | "optimizedExistingUser"
-        | "localAfterFreeTrial";
+        | "localAfterFreeTrial"
+        | "bestExperience";
     },
     void,
   ];
   addAutocompleteModel: [{ model: ModelDescription }, void];
+
+  "profiles/switch": [{ id: string }, undefined];
+
+  "auth/getAuthUrl": [undefined, { url: string }];
 };

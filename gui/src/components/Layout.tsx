@@ -1,7 +1,4 @@
-import {
-  Cog6ToothIcon,
-  QuestionMarkCircleIcon,
-} from "@heroicons/react/24/outline";
+import { QuestionMarkCircleIcon } from "@heroicons/react/24/outline";
 import { IndexingProgressUpdate } from "core";
 import { useContext, useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
@@ -15,6 +12,7 @@ import {
 } from ".";
 import { IdeMessengerContext } from "../context/IdeMessenger";
 import { useWebviewListener } from "../hooks/useWebviewListener";
+import { shouldBeginOnboarding } from "../pages/onboarding/utils";
 import { defaultModelSelector } from "../redux/selectors/modelSelectors";
 import {
   setBottomMessage,
@@ -23,13 +21,14 @@ import {
 } from "../redux/slices/uiStateSlice";
 import { RootState } from "../redux/store";
 import { getFontSize, isMetaEquivalentKeyPressed } from "../util";
+import { FREE_TRIAL_LIMIT_REQUESTS } from "../util/freeTrial";
 import { getLocalStorage, setLocalStorage } from "../util/localStorage";
-import HeaderButtonWithText from "./HeaderButtonWithText";
 import TextDialog from "./dialogs";
-import { ftl } from "./dialogs/FTCDialog";
+import HeaderButtonWithText from "./HeaderButtonWithText";
 import IndexingProgressBar from "./loaders/IndexingProgressBar";
 import ProgressBar from "./loaders/ProgressBar";
-import ModelSelect from "./modelSelection/ModelSelect";
+import PostHogPageView from "./PosthogPageView";
+import ProfileSwitcher from "./ProfileSwitcher";
 
 // #region Styled Components
 const FOOTER_HEIGHT = "1.8em";
@@ -37,6 +36,17 @@ const FOOTER_HEIGHT = "1.8em";
 const LayoutTopDiv = styled(CustomScrollbarDiv)`
   height: 100%;
   border-radius: ${defaultBorderRadius};
+  position: relative;
+
+  &::after {
+    position: absolute;
+    content: "";
+    width: 100%;
+    height: 1px;
+    background-color: rgba(136, 136, 136, 0.3);
+    top: 0;
+    left: 0;
+  }
 `;
 
 const BottomMessageDiv = styled.div<{ displayOnBottom: boolean }>`
@@ -67,7 +77,8 @@ const Footer = styled.footer`
   height: ${FOOTER_HEIGHT};
   background-color: transparent;
   backdrop-filter: blur(12px);
-
+  border-top: 1px solid rgba(136, 136, 136, 0.3);
+  border-bottom: 1px solid rgba(136, 136, 136, 0.3);
   overflow: hidden;
 `;
 
@@ -78,7 +89,7 @@ const GridDiv = styled.div`
   overflow-x: visible;
 `;
 
-const DropdownPortalDiv = styled.div`
+const ModelDropdownPortalDiv = styled.div`
   background-color: ${vscInputBackground};
   position: relative;
   margin-left: 8px;
@@ -86,11 +97,17 @@ const DropdownPortalDiv = styled.div`
   font-size: ${getFontSize()};
 `;
 
+const ProfileDropdownPortalDiv = styled.div`
+  background-color: ${vscInputBackground};
+  position: relative;
+  margin-left: calc(100% - 190px);
+  z-index: 200;
+  font-size: ${getFontSize() - 2};
+`;
+
 // #endregion
 
 const HIDE_FOOTER_ON_PAGES = [
-  "/onboarding",
-  "/existingUserOnboarding",
   "/onboarding",
   "/localOnboarding",
   "/apiKeyOnboarding",
@@ -213,9 +230,8 @@ const Layout = () => {
   );
 
   useEffect(() => {
-    const onboardingComplete = getLocalStorage("onboardingComplete");
     if (
-      !onboardingComplete &&
+      shouldBeginOnboarding() &&
       (location.pathname === "/" || location.pathname === "/index.html")
     ) {
       navigate("/onboarding");
@@ -250,22 +266,26 @@ const Layout = () => {
         />
 
         <GridDiv>
+          <PostHogPageView />
           <Outlet />
-          <DropdownPortalDiv id="model-select-top-div"></DropdownPortalDiv>
+          <ModelDropdownPortalDiv id="model-select-top-div"></ModelDropdownPortalDiv>
+          <ProfileDropdownPortalDiv id="profile-select-top-div"></ProfileDropdownPortalDiv>
           {HIDE_FOOTER_ON_PAGES.includes(location.pathname) || (
             <Footer>
-              <div className="mr-auto flex gap-2 items-center">
-                <ModelSelect />
+              <div className="mr-auto flex flex-grow gap-2 items-center overflow-hidden">
                 {indexingState.status !== "indexing" && // Would take up too much space together with indexing progress
                   defaultModel?.provider === "free-trial" && (
                     <ProgressBar
                       completed={parseInt(localStorage.getItem("ftc") || "0")}
-                      total={ftl()}
+                      total={FREE_TRIAL_LIMIT_REQUESTS}
                     />
                   )}
                 <IndexingProgressBar indexingState={indexingState} />
               </div>
+
+              <ProfileSwitcher />
               <HeaderButtonWithText
+                tooltipPlacement="top-end"
                 text="Help"
                 onClick={() => {
                   if (location.pathname === "/help") {
@@ -276,15 +296,6 @@ const Layout = () => {
                 }}
               >
                 <QuestionMarkCircleIcon width="1.4em" height="1.4em" />
-              </HeaderButtonWithText>
-              <HeaderButtonWithText
-                onClick={() => {
-                  // navigate("/settings");
-                  ideMessenger.post("openConfigJson", undefined);
-                }}
-                text="Configure Continue"
-              >
-                <Cog6ToothIcon width="1.4em" height="1.4em" />
               </HeaderButtonWithText>
             </Footer>
           )}

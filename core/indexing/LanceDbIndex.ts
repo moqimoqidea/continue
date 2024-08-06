@@ -9,9 +9,8 @@ import {
   IndexTag,
   IndexingProgressUpdate,
 } from "../index.js";
-import { MAX_CHUNK_SIZE } from "../llm/constants.js";
 import { getBasename } from "../util/index.js";
-import { getLanceDbPath } from "../util/paths.js";
+import { getLanceDbPath, migrate } from "../util/paths.js";
 import { chunkDocument } from "./chunk/chunk.js";
 import { DatabaseConnection, SqliteDb, tagToString } from "./refreshIndex.js";
 import {
@@ -31,11 +30,10 @@ interface LanceDbRow {
 }
 
 export class LanceDbIndex implements CodebaseIndex {
+  relativeExpectedTime: number = 13;
   get artifactId(): string {
     return `vectordb::${this.embeddingsProvider.id}`;
   }
-
-  static MAX_CHUNK_SIZE = MAX_CHUNK_SIZE;
 
   constructor(
     private readonly embeddingsProvider: EmbeddingsProvider,
@@ -52,11 +50,36 @@ export class LanceDbIndex implements CodebaseIndex {
         uuid TEXT PRIMARY KEY,
         cacheKey TEXT NOT NULL,
         path TEXT NOT NULL,
+        artifact_id TEXT NOT NULL,
         vector TEXT NOT NULL,
         startLine INTEGER NOT NULL,
         endLine INTEGER NOT NULL,
         contents TEXT NOT NULL
     )`);
+
+    await new Promise((resolve) =>
+      migrate(
+        "lancedb_sqlite_artifact_id_column",
+        async () => {
+          try {
+            const pragma = await db.all("PRAGMA table_info(lance_db_cache)");
+
+            const hasArtifactIdCol = pragma.some(
+              (pragma) => pragma.name === "artifact_id",
+            );
+
+            if (!hasArtifactIdCol) {
+              await db.exec(
+                "ALTER TABLE lance_db_cache ADD COLUMN artifact_id TEXT NOT NULL DEFAULT 'UNDEFINED'",
+              );
+            }
+          } finally {
+            resolve(undefined);
+          }
+        },
+        () => resolve(undefined),
+      ),
+    );
   }
 
   private async *computeChunks(
@@ -81,12 +104,12 @@ export class LanceDbIndex implements CodebaseIndex {
 
       let hasEmptyChunks = false;
 
-      for await (const chunk of chunkDocument(
-        items[i].path,
-        content,
-        LanceDbIndex.MAX_CHUNK_SIZE,
-        items[i].cacheKey,
-      )) {
+      for await (const chunk of chunkDocument({
+        filepath: items[i].path,
+        contents: content,
+        maxChunkSize: this.embeddingsProvider.maxChunkSize,
+        digest: items[i].cacheKey,
+      })) {
         if (chunk.content.length == 0) {
           hasEmptyChunks = true;
           break;
@@ -104,10 +127,20 @@ export class LanceDbIndex implements CodebaseIndex {
         continue;
       }
 
-      // Calculate embeddings
-      const embeddings = await this.embeddingsProvider.embed(
-        chunks.map((c) => c.content),
-      );
+      let embeddings: number[][];
+      try {
+        // Calculate embeddings
+        embeddings = await this.embeddingsProvider.embed(
+          chunks.map((c) => c.content),
+        );
+      } catch (e) {
+        // Rather than fail the entire indexing process, we'll just skip this file
+        // so that it may be picked up on the next indexing attempt
+        console.warn(
+          `Failed to generate embedding for ${chunks[0]?.filepath} with provider: ${this.embeddingsProvider.id}: ${e}`,
+        );
+        continue;
+      }
 
       if (embeddings.some((emb) => emb === undefined)) {
         throw new Error(
@@ -220,10 +253,11 @@ export class LanceDbIndex implements CodebaseIndex {
             rows.push(row);
 
             await sqlite.run(
-              "INSERT INTO lance_db_cache (uuid, cacheKey, path, vector, startLine, endLine, contents) VALUES (?, ?, ?, ?, ?, ?, ?)",
+              "INSERT INTO lance_db_cache (uuid, cacheKey, path, artifact_id, vector, startLine, endLine, contents) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
               row.uuid,
               row.cachekey,
               row.path,
+              this.artifactId,
               JSON.stringify(row.vector),
               chunk.startLine,
               chunk.endLine,
@@ -243,6 +277,9 @@ export class LanceDbIndex implements CodebaseIndex {
       }
     }
 
+    const progressReservedForTagging = 0.1;
+    let accumulatedProgress = 0;
+
     let computedRows: LanceDbRow[] = [];
     for await (const update of this.computeChunks(results.compute)) {
       if (Array.isArray(update)) {
@@ -251,17 +288,23 @@ export class LanceDbIndex implements CodebaseIndex {
 
         // Add the computed row to the cache
         await sqlite.run(
-          "INSERT INTO lance_db_cache (uuid, cacheKey, path, vector, startLine, endLine, contents) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO lance_db_cache (uuid, cacheKey, path, artifact_id, vector, startLine, endLine, contents) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
           row.uuid,
           row.cachekey,
           row.path,
+          this.artifactId,
           JSON.stringify(row.vector),
           data.startLine,
           data.endLine,
           data.contents,
         );
 
-        yield { progress, desc, status: "indexing" };
+        accumulatedProgress = progress * (1 - progressReservedForTagging);
+        yield {
+          progress: accumulatedProgress,
+          desc,
+          status: "indexing",
+        };
       } else {
         await addComputedLanceDbRows(update, computedRows);
         computedRows = [];
@@ -271,9 +314,10 @@ export class LanceDbIndex implements CodebaseIndex {
     // Add tag - retrieve the computed info from lance sqlite cache
     for (const { path, cacheKey } of results.addTag) {
       const stmt = await sqlite.prepare(
-        "SELECT * FROM lance_db_cache WHERE cacheKey = ? AND path = ?",
+        "SELECT * FROM lance_db_cache WHERE cacheKey = ? AND path = ? AND artifact_id = ?",
         cacheKey,
         path,
+        this.artifactId,
       );
       const cachedItems = await stmt.all();
 
@@ -286,21 +330,41 @@ export class LanceDbIndex implements CodebaseIndex {
         };
       });
 
-      if (needToCreateTable && lanceRows.length > 0) {
-        table = await db.createTable(tableName, lanceRows);
-        needToCreateTable = false;
-      } else if (lanceRows.length > 0) {
-        await table?.add(lanceRows);
+      if (lanceRows.length > 0) {
+        if (needToCreateTable) {
+          table = await db.createTable(tableName, lanceRows);
+          needToCreateTable = false;
+        } else if (!table) {
+          table = await db.openTable(tableName);
+          needToCreateTable = false;
+          await table.add(lanceRows);
+        } else {
+          await table?.add(lanceRows);
+        }
       }
 
       markComplete([{ path, cacheKey }], IndexResultType.AddTag);
+      accumulatedProgress += 1 / results.addTag.length / 3;
+      yield {
+        progress: accumulatedProgress,
+        desc: `Indexing ${getBasename(path)}`,
+        status: "indexing",
+      };
     }
 
     // Delete or remove tag - remove from lance table)
     if (!needToCreateTable) {
-      for (const { path, cacheKey } of [...results.removeTag, ...results.del]) {
+      const toDel = [...results.removeTag, ...results.del];
+      for (const { path, cacheKey } of toDel) {
         // This is where the aforementioned lowercase conversion problem shows
         await table?.delete(`cachekey = '${cacheKey}' AND path = '${path}'`);
+
+        accumulatedProgress += 1 / toDel.length / 3;
+        yield {
+          progress: accumulatedProgress,
+          desc: `Stashing ${getBasename(path)}`,
+          status: "indexing",
+        };
       }
     }
     markComplete(results.removeTag, IndexResultType.RemoveTag);
@@ -308,10 +372,17 @@ export class LanceDbIndex implements CodebaseIndex {
     // Delete - also remove from sqlite cache
     for (const { path, cacheKey } of results.del) {
       await sqlite.run(
-        "DELETE FROM lance_db_cache WHERE cacheKey = ? AND path = ?",
+        "DELETE FROM lance_db_cache WHERE cacheKey = ? AND path = ? AND artifact_id = ?",
         cacheKey,
         path,
+        this.artifactId,
       );
+      accumulatedProgress += 1 / results.del.length / 3;
+      yield {
+        progress: accumulatedProgress,
+        desc: `Removing ${getBasename(path)}`,
+        status: "indexing",
+      };
     }
 
     markComplete(results.del, IndexResultType.Delete);

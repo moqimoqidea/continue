@@ -5,11 +5,14 @@ import type {
   IdeInfo,
   IdeSettings,
   IndexTag,
+  Location,
   Problem,
   Range,
+  RangeInFile,
   Thread,
 } from "../index.js";
 import { ToIdeFromWebviewOrCoreProtocol } from "../protocol/ide.js";
+import { FromIdeProtocol } from "../protocol/index.js";
 
 export class MessageIde implements IDE {
   constructor(
@@ -17,7 +20,24 @@ export class MessageIde implements IDE {
       messageType: T,
       data: ToIdeFromWebviewOrCoreProtocol[T][0],
     ) => Promise<ToIdeFromWebviewOrCoreProtocol[T][1]>,
+    private readonly on: <T extends keyof FromIdeProtocol>(
+      messageType: T,
+      callback: (data: FromIdeProtocol[T][0]) => FromIdeProtocol[T][1],
+    ) => void,
   ) {}
+  pathSep(): Promise<string> {
+    return this.request("pathSep", undefined);
+  }
+  fileExists(filepath: string): Promise<boolean> {
+    return this.request("fileExists", { filepath });
+  }
+  async gotoDefinition(location: Location): Promise<RangeInFile[]> {
+    return this.request("gotoDefinition", { location });
+  }
+  onDidChangeActiveTextEditor(callback: (filepath: string) => void): void {
+    this.on("didChangeActiveTextEditor", (data) => callback(data.filepath));
+  }
+
   getIdeSettings(): Promise<IdeSettings> {
     return this.request("getIdeSettings", undefined);
   }
@@ -35,7 +55,7 @@ export class MessageIde implements IDE {
   }
 
   infoPopup(message: string): Promise<void> {
-    return this.request("errorPopup", { message });
+    return this.request("infoPopup", { message });
   }
 
   errorPopup(message: string): Promise<void> {
@@ -94,16 +114,6 @@ export class MessageIde implements IDE {
 
   async getTerminalContents() {
     return await this.request("getTerminalContents", undefined);
-  }
-
-  async listWorkspaceContents(
-    directory?: string,
-    useGitIgnore?: boolean,
-  ): Promise<string[]> {
-    return await this.request("listWorkspaceContents", {
-      directory,
-      useGitIgnore,
-    });
   }
 
   async getWorkspaceDirs(): Promise<string[]> {

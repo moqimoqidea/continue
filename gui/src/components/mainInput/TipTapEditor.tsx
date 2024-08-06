@@ -4,6 +4,7 @@ import Image from "@tiptap/extension-image";
 import Paragraph from "@tiptap/extension-paragraph";
 import Placeholder from "@tiptap/extension-placeholder";
 import Text from "@tiptap/extension-text";
+import { Plugin } from "@tiptap/pm/state";
 import { Editor, EditorContent, JSONContent, useEditor } from "@tiptap/react";
 import {
   ContextItemWithId,
@@ -13,6 +14,7 @@ import {
 } from "core";
 import { modelSupportsImages } from "core/llm/autodetect";
 import { getBasename, getRelativePath } from "core/util";
+import { usePostHog } from "posthog-js/react";
 import { useContext, useEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import styled from "styled-components";
@@ -42,20 +44,24 @@ import {
   getFontSize,
   isJetBrains,
   isMetaEquivalentKeyPressed,
+  isWebEnvironment,
 } from "../../util";
 import CodeBlockExtension from "./CodeBlockExtension";
 import { SlashCommand } from "./CommandsExtension";
 import InputToolbar from "./InputToolbar";
 import { Mention } from "./MentionExtension";
 import "./TipTapEditor.css";
-import { getCommandSuggestion, getMentionSuggestion } from "./getSuggestion";
+import {
+  getContextProviderDropdownOptions,
+  getSlashCommandDropdownOptions,
+} from "./getSuggestion";
 import { ComboBoxItem } from "./types";
 
 const InputBoxDiv = styled.div`
   resize: none;
 
-  padding: 8px;
-  padding-bottom: 24px;
+  padding: 8px 12px;
+  padding-bottom: 4px;
   font-family: inherit;
   border-radius: ${defaultBorderRadius};
   margin: 0;
@@ -67,7 +73,6 @@ const InputBoxDiv = styled.div`
   border: 0.5px solid ${vscInputBorder};
   outline: none;
   font-size: ${getFontSize()}px;
-
   &:focus {
     outline: none;
 
@@ -78,7 +83,8 @@ const InputBoxDiv = styled.div`
     color: ${lightGray}cc;
   }
 
-  position: relative;
+  display: flex;
+  flex-direction: column;
 `;
 
 const HoverDiv = styled.div`
@@ -133,7 +139,6 @@ interface TipTapEditorProps {
   availableSlashCommands: ComboBoxItem[];
   isMainInput: boolean;
   onEnter: (editorState: JSONContent, modifiers: InputModifiers) => void;
-
   editorState?: JSONContent;
 }
 
@@ -148,9 +153,10 @@ function TipTapEditor(props: TipTapEditorProps) {
   );
   const useActiveFile = useSelector(selectUseActiveFile);
 
-  const [inputFocused, setInputFocused] = useState(false);
-
   const { saveSession } = useHistory(dispatch);
+
+  const posthog = usePostHog();
+  const [isEditorFocused, setIsEditorFocused] = useState(false);
 
   const inSubmenuRef = useRef<string | undefined>(undefined);
   const inDropdownRef = useRef(false);
@@ -255,7 +261,41 @@ function TipTapEditor(props: TipTapEditorProps) {
     extensions: [
       Document,
       History,
-      Image,
+      Image.extend({
+        addProseMirrorPlugins() {
+          const plugin = new Plugin({
+            props: {
+              handleDOMEvents: {
+                paste(view, event) {
+                  console.log("Pasting image");
+                  const items = event.clipboardData.items;
+                  for (const item of items) {
+                    const file = item.getAsFile();
+                    file &&
+                      modelSupportsImages(
+                        defaultModel.provider,
+                        defaultModel.model,
+                        defaultModel.title,
+                        defaultModel.capabilities,
+                      ) &&
+                      handleImageFile(file).then((resp) => {
+                        if (!resp) return;
+                        const [img, dataUrl] = resp;
+                        const { schema } = view.state;
+                        const node = schema.nodes.image.create({
+                          src: dataUrl,
+                        });
+                        const tr = view.state.tr.insert(0, node);
+                        view.dispatch(tr);
+                      });
+                  }
+                },
+              },
+            },
+          });
+          return [plugin];
+        },
+      }),
       Placeholder.configure({
         placeholder: () =>
           historyLengthRef.current === 0
@@ -285,10 +325,13 @@ function TipTapEditor(props: TipTapEditorProps) {
               return true;
             },
             "Alt-Enter": () => {
+              posthog.capture("gui_use_active_file_enter");
+
               onEnterRef.current({
                 useCodebase: false,
                 noContext: useActiveFile,
               });
+
               return true;
             },
             "Cmd-Backspace": () => {
@@ -353,7 +396,7 @@ function TipTapEditor(props: TipTapEditorProps) {
         HTMLAttributes: {
           class: "mention",
         },
-        suggestion: getMentionSuggestion(
+        suggestion: getContextProviderDropdownOptions(
           availableContextProvidersRef,
           getSubmenuContextItemsRef,
           enterSubmenu,
@@ -370,7 +413,7 @@ function TipTapEditor(props: TipTapEditorProps) {
         HTMLAttributes: {
           class: "mention",
         },
-        suggestion: getCommandSuggestion(
+        suggestion: getSlashCommandDropdownOptions(
           availableSlashCommandsRef,
           onClose,
           onOpen,
@@ -389,6 +432,8 @@ function TipTapEditor(props: TipTapEditorProps) {
       },
     },
     content: props.editorState || mainEditorContent || "",
+    onFocus: () => setIsEditorFocused(true),
+    onBlur: () => setIsEditorFocused(false),
     onUpdate: ({ editor, transaction }) => {
       // If /edit is typed and no context items are selected, select the first
 
@@ -433,6 +478,41 @@ function TipTapEditor(props: TipTapEditorProps) {
     if (isJetBrains()) {
       // This is only for VS Code .ipynb files
       return;
+    }
+
+    if (isWebEnvironment()) {
+      const handleKeyDown = async (event: KeyboardEvent) => {
+        if (!editor || !editorFocusedRef.current) return;
+        if ((event.metaKey || event.ctrlKey) && event.key === "x") {
+          // Cut
+          const selectedText = editor.state.doc.textBetween(
+            editor.state.selection.from,
+            editor.state.selection.to,
+          );
+          navigator.clipboard.writeText(selectedText);
+          editor.commands.deleteSelection();
+          event.preventDefault();
+        } else if ((event.metaKey || event.ctrlKey) && event.key === "c") {
+          // Copy
+          const selectedText = editor.state.doc.textBetween(
+            editor.state.selection.from,
+            editor.state.selection.to,
+          );
+          navigator.clipboard.writeText(selectedText);
+          event.preventDefault();
+        } else if ((event.metaKey || event.ctrlKey) && event.key === "v") {
+          // Paste
+          event.preventDefault(); // Prevent default paste behavior
+          const clipboardText = await navigator.clipboard.readText();
+          editor.commands.insertContent(clipboardText);
+        }
+      };
+
+      document.addEventListener("keydown", handleKeyDown);
+
+      return () => {
+        document.removeEventListener("keydown", handleKeyDown);
+      };
     }
 
     const handleKeyDown = async (event: KeyboardEvent) => {
@@ -590,8 +670,13 @@ function TipTapEditor(props: TipTapEditorProps) {
         const rif: RangeInFile & { contents: string } =
           data.rangeInFileWithContents;
         const basename = getBasename(rif.filepath);
-        const relativePath = getRelativePath(rif.filepath, await ideMessenger.ide.getWorkspaceDirs());
-        const rangeStr = `(${rif.range.start.line + 1}-${rif.range.end.line + 1})`;
+        const relativePath = getRelativePath(
+          rif.filepath,
+          await ideMessenger.ide.getWorkspaceDirs(),
+        );
+        const rangeStr = `(${rif.range.start.line + 1}-${
+          rif.range.end.line + 1
+        })`;
         const item: ContextItemWithId = {
           content: rif.contents,
           name: `${basename} ${rangeStr}`,
@@ -620,6 +705,16 @@ function TipTapEditor(props: TipTapEditorProps) {
             },
           })
           .run();
+
+        if (data.prompt) {
+          editor.commands.focus("end");
+          editor.commands.insertContent(data.prompt);
+        }
+
+        if (data.shouldRun) {
+          onEnterRef.current({ useCodebase: false, noContext: true });
+        }
+
         setTimeout(() => {
           editor.commands.blur();
           editor.commands.focus("end");
@@ -633,19 +728,18 @@ function TipTapEditor(props: TipTapEditorProps) {
       historyLength,
       ignoreHighlightedCode,
       props.isMainInput,
+      onEnterRef.current,
     ],
   );
 
-  // On linux+jetbrains only was stealing focus
-  // useEffect(() => {
-  //   if (props.isMainInput && editor && document.hasFocus()) {
-  //     editor.commands.focus();
-  //     // setTimeout(() => {
-  //     //   // https://github.com/continuedev/continue/pull/881
-  //     //   editor.commands.blur();
-  //     // }, 0);
-  //   }
-  // }, [editor, props.isMainInput, historyLength, ignoreHighlightedCode]);
+  useWebviewListener(
+    "isContinueInputFocused",
+    async () => {
+      return props.isMainInput && editorFocusedRef.current;
+    },
+    [editorFocusedRef, props.isMainInput],
+    !props.isMainInput,
+  );
 
   const [showDragOverMsg, setShowDragOverMsg] = useState(false);
 
@@ -711,6 +805,7 @@ function TipTapEditor(props: TipTapEditorProps) {
             defaultModel.provider,
             defaultModel.model,
             defaultModel.title,
+            defaultModel.capabilities,
           )
         ) {
           return;
@@ -729,22 +824,13 @@ function TipTapEditor(props: TipTapEditorProps) {
       <EditorContent
         spellCheck={false}
         editor={editor}
-        onFocus={() => {
-          setInputFocused(true);
-        }}
-        onBlur={() => {
-          // hack to stop from cancelling press of "Enter"
-          setTimeout(() => {
-            setInputFocused(false);
-          }, 100);
-        }}
         onClick={(event) => {
           event.stopPropagation();
         }}
       />
       <InputToolbar
         showNoContext={optionKeyHeld}
-        hidden={!(inputFocused || props.isMainInput)}
+        hidden={!(editorFocusedRef.current || props.isMainInput)}
         onAddContextItem={() => {
           if (editor.getText().endsWith("@")) {
           } else {
@@ -768,6 +854,7 @@ function TipTapEditor(props: TipTapEditorProps) {
           defaultModel.provider,
           defaultModel.model,
           defaultModel.title,
+          defaultModel.capabilities,
         ) && (
           <>
             <HoverDiv></HoverDiv>

@@ -127,6 +127,7 @@ export interface ContextProviderDescription {
 export type FetchFunction = (url: string | URL, init?: any) => Promise<any>;
 
 export interface ContextProviderExtras {
+  config: ContinueConfig;
   fullInput: string;
   embeddingsProvider: EmbeddingsProvider;
   reranker: Reranker | undefined;
@@ -137,6 +138,7 @@ export interface ContextProviderExtras {
 }
 
 export interface LoadSubmenuItemsArgs {
+  config: ContinueConfig;
   ide: IDE;
   fetch: FetchFunction;
 }
@@ -160,20 +162,21 @@ export interface ContextSubmenuItem {
   id: string;
   title: string;
   description: string;
-  iconUrl?: string;
+  icon?: string;
+  metadata?: any;
 }
 
 export interface SiteIndexingConfig {
-  startUrl: string;
-  rootUrl: string;
   title: string;
+  startUrl: string;
+  rootUrl?: string;
   maxDepth?: number;
   faviconUrl?: string;
 }
 
 export interface SiteIndexingConfig {
   startUrl: string;
-  rootUrl: string;
+  rootUrl?: string;
   title: string;
   maxDepth?: number;
 }
@@ -206,6 +209,11 @@ export interface SessionInfo {
 export interface RangeInFile {
   filepath: string;
   range: Range;
+}
+
+export interface Location {
+  filepath: string;
+  position: Position;
 }
 
 export interface FileWithContents {
@@ -262,6 +270,7 @@ export interface ContextItem {
   description: string;
   editing?: boolean;
   editable?: boolean;
+  icon?: string;
 }
 
 export interface ContextItemWithId {
@@ -271,6 +280,7 @@ export interface ContextItemWithId {
   id: ContextItemId;
   editing?: boolean;
   editable?: boolean;
+  icon?: string;
 }
 
 export interface InputModifiers {
@@ -332,6 +342,15 @@ export interface LLMOptions {
   // GCP Options
   region?: string;
   projectId?: string;
+  capabilities?: ModelCapability;
+
+  // WatsonX options
+  watsonxUrl?: string;
+  watsonxApiKey?: string;
+  watsonxZenApiKeyBase64?: string; // Required if using watsonx software with ZenApiKey auth
+  watsonxUsername?: string;
+  watsonxPassword?: string;
+  watsonxProjectId?: string;
 }
 type RequireAtLeastOne<T, Keys extends keyof T = keyof T> = Pick<
   T,
@@ -368,8 +387,10 @@ export type CustomLLM = RequireAtLeastOne<
 
 // IDE
 
+export type DiffLineType = "new" | "old" | "same";
+
 export interface DiffLine {
-  type: "new" | "old" | "same";
+  type: DiffLineType;
   line: string;
 }
 
@@ -413,6 +434,9 @@ export interface IdeSettings {
   remoteConfigServerUrl: string | undefined;
   remoteConfigSyncPeriod: number;
   userToken: string;
+  enableControlServerBeta: boolean;
+  pauseCodebaseIndexOnStart: boolean;
+  enableDebugLogs: boolean;
 }
 
 export interface IDE {
@@ -428,13 +452,10 @@ export interface IDE {
     stackDepth: number,
   ): Promise<string[]>;
   getAvailableThreads(): Promise<Thread[]>;
-  listWorkspaceContents(
-    directory?: string,
-    useGitIgnore?: boolean,
-  ): Promise<string[]>;
   listFolders(): Promise<string[]>;
   getWorkspaceDirs(): Promise<string[]>;
   getWorkspaceConfigs(): Promise<ContinueRcJson[]>;
+  fileExists(filepath: string): Promise<boolean>;
   writeFile(path: string, contents: string): Promise<void>;
   showVirtualFile(title: string, contents: string): Promise<void>;
   getContinueDir(): Promise<string>;
@@ -469,6 +490,13 @@ export interface IDE {
   listDir(dir: string): Promise<[string, FileType][]>;
   getLastModified(files: string[]): Promise<{ [path: string]: number }>;
   getGitHubAuthToken(): Promise<string | undefined>;
+
+  // LSP
+  gotoDefinition(location: Location): Promise<RangeInFile[]>;
+
+  // Callbacks
+  onDidChangeActiveTextEditor(callback: (filepath: string) => void): void;
+  pathSep(): Promise<string>;
 }
 
 // Slash Commands
@@ -573,7 +601,9 @@ type ModelProvider =
   | "cloudflare"
   | "deepseek"
   | "azure"
-  | "openai-aiohttp";
+  | "openai-aiohttp"
+  | "msty"
+  | "watsonx";
 
 export type ModelName =
   | "AUTODETECT"
@@ -584,6 +614,7 @@ export type ModelName =
   | "gpt-3.5-turbo-0613"
   | "gpt-4-32k"
   | "gpt-4o"
+  | "gpt-4o-mini"
   | "gpt-4-turbo"
   | "gpt-4-turbo-preview"
   | "gpt-4-vision-preview"
@@ -653,6 +684,13 @@ export interface RequestOptions {
   headers?: { [key: string]: string };
   extraBodyProperties?: { [key: string]: any };
   noProxy?: string[];
+  clientCertificate?: ClientCertificateOptions;
+}
+
+export interface ClientCertificateOptions {
+  cert: string;
+  key: string;
+  passphrase?: string;
 }
 
 export interface StepWithParams {
@@ -693,6 +731,10 @@ interface BaseCompletionOptions {
   stream?: boolean;
 }
 
+export interface ModelCapability {
+  uploadImage?: boolean;
+}
+
 export interface ModelDescription {
   title: string;
   provider: ModelProvider;
@@ -705,21 +747,29 @@ export interface ModelDescription {
   systemMessage?: string;
   requestOptions?: RequestOptions;
   promptTemplates?: { [key: string]: string };
+  capabilities?: ModelCapability;
 }
 
 export type EmbeddingsProviderName =
+  | "huggingface-tei"
   | "transformers.js"
   | "ollama"
   | "openai"
   | "cohere"
   | "free-trial"
-  | "gemini";
+  | "gemini"
+  | "continue-proxy"
+  | "deepinfra";
 
 export interface EmbedOptions {
   apiBase?: string;
   apiKey?: string;
   model?: string;
+  engine?: string;
+  apiType?: string;
+  apiVersion?: string;
   requestOptions?: RequestOptions;
+  maxChunkSize?: number;
 }
 
 export interface EmbeddingsProviderDescription extends EmbedOptions {
@@ -728,10 +778,18 @@ export interface EmbeddingsProviderDescription extends EmbedOptions {
 
 export interface EmbeddingsProvider {
   id: string;
+  providerName: EmbeddingsProviderName;
+  maxChunkSize: number;
   embed(chunks: string[]): Promise<number[][]>;
 }
 
-export type RerankerName = "cohere" | "voyage" | "llm" | "free-trial";
+export type RerankerName =
+  | "cohere"
+  | "voyage"
+  | "llm"
+  | "free-trial"
+  | "huggingface-tei"
+  | "continue-proxy";
 
 export interface RerankerDescription {
   name: RerankerName;
@@ -746,7 +804,7 @@ export interface Reranker {
 export interface TabAutocompleteOptions {
   disable: boolean;
   useCopyBuffer: boolean;
-  useSuffix: boolean;
+  useFileSuffix: boolean;
   maxPromptTokens: number;
   debounceDelay: number;
   maxSuffixPercentage: number;
@@ -763,11 +821,13 @@ export interface TabAutocompleteOptions {
   useRecentlyEdited: boolean;
   recentLinePrefixMatchMinLength: number;
   disableInFiles?: string[];
+  useImports?: boolean;
 }
 
 export interface ContinueUIConfig {
   codeBlockToolbarPosition?: "top" | "bottom";
   fontSize?: number;
+  displayRawMarkdown?: boolean;
 }
 
 interface ContextMenuConfig {
@@ -780,6 +840,32 @@ interface ContextMenuConfig {
 
 interface ModelRoles {
   inlineEdit?: string;
+  applyCodeBlock?: string;
+}
+
+/**
+ * Represents the configuration for a quick action in the Code Lens.
+ * Quick actions are custom commands that can be added to function and class declarations.
+ */
+interface QuickActionConfig {
+  /**
+   * The title of the quick action that will display in the Code Lens.
+   */
+  title: string;
+
+  /**
+   * The prompt that will be sent to the model when the quick action is invoked,
+   * with the function or class body concatenated.
+   */
+  prompt: string;
+
+  /**
+   * If `true`, the result of the quick action will be sent to the chat panel.
+   * If `false`, the streamed result will be inserted into the document.
+   *
+   * Defaults to `false`.
+   */
+  sendToChat: boolean;
 }
 
 interface ExperimentalConfig {
@@ -787,6 +873,18 @@ interface ExperimentalConfig {
   modelRoles?: ModelRoles;
   defaultContext?: "activeFile"[];
   promptPath?: string;
+
+  /**
+   * Quick actions are a way to add custom commands to the Code Lens of
+   * function and class declarations.
+   */
+  quickActions?: QuickActionConfig[];
+}
+
+interface AnalyticsConfig {
+  type: string;
+  url?: string;
+  clientKey?: string;
 }
 
 // config.json
@@ -809,6 +907,8 @@ export interface SerializedContinueConfig {
   ui?: ContinueUIConfig;
   reranker?: RerankerDescription;
   experimental?: ExperimentalConfig;
+  analytics?: AnalyticsConfig;
+  docs?: SiteIndexingConfig[];
 }
 
 export type ConfigMergeType = "merge" | "overwrite";
@@ -859,6 +959,8 @@ export interface Config {
   reranker?: RerankerDescription | Reranker;
   /** Experimental configuration */
   experimental?: ExperimentalConfig;
+  /** Analytics configuration */
+  analytics?: AnalyticsConfig;
 }
 
 // in the actual Continue source code
@@ -879,6 +981,8 @@ export interface ContinueConfig {
   ui?: ContinueUIConfig;
   reranker?: Reranker;
   experimental?: ExperimentalConfig;
+  analytics?: AnalyticsConfig;
+  docs?: SiteIndexingConfig[];
 }
 
 export interface BrowserSerializedContinueConfig {
@@ -896,4 +1000,5 @@ export interface BrowserSerializedContinueConfig {
   ui?: ContinueUIConfig;
   reranker?: RerankerDescription;
   experimental?: ExperimentalConfig;
+  analytics?: AnalyticsConfig;
 }

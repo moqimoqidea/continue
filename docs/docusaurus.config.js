@@ -185,6 +185,26 @@ const config = {
             from: "/model-setup/configuration",
             to: "/setup/configuration",
           },
+          {
+            from: "/setup/select-provider",
+            to: "/setup/model-providers",
+          },
+          {
+            from: "/walkthroughs/codebase-embeddings",
+            to: "/features/codebase-embeddings",
+          },
+          {
+            from: "/walkthroughs/tab-autocomplete",
+            to: "/features/tab-autocomplete",
+          },
+          {
+            from: "/walkthroughs/prompt-files",
+            to: "/features/prompt-files",
+          },
+          {
+            from: "/walkthroughs/quick-actions",
+            to: "/features/quick-actions",
+          },
         ],
       },
     ],

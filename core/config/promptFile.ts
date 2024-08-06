@@ -1,9 +1,11 @@
+import Handlebars from "handlebars";
 import path from "path";
 import * as YAML from "yaml";
 import type { IDE, SlashCommand } from "..";
-import { stripImages } from "../llm/countTokens.js";
-import { renderTemplatedString } from "../llm/llms/index.js";
-import { getBasename } from "../util/index.js";
+import { walkDir } from "../indexing/walkDir";
+import { stripImages } from "../llm/images";
+import { renderTemplatedString } from "../llm/llms/index";
+import { getBasename } from "../util/index";
 
 export const DEFAULT_PROMPTS_FOLDER = ".prompts";
 
@@ -12,7 +14,12 @@ export async function getPromptFiles(
   dir: string,
 ): Promise<{ path: string; content: string }[]> {
   try {
-    const paths = await ide.listWorkspaceContents(dir, false);
+    const exists = await ide.fileExists(dir);
+    if (!exists) {
+      return [];
+    }
+
+    const paths = await walkDir(dir, ide, { ignoreFiles: [] });
     const results = paths.map(async (path) => {
       const content = await ide.readFile(path);
       return { path, content };
@@ -27,7 +34,7 @@ export async function getPromptFiles(
 const DEFAULT_PROMPT_FILE = `# This is an example ".prompt" file
 # It is used to define and reuse prompts within Continue
 # Continue will automatically create a slash command for each prompt in the .prompts folder
-# To learn more, see the full .prompt file reference: https://docs.continue.dev/walkthroughs/prompt-files
+# To learn more, see the full .prompt file reference: https://docs.continue.dev/features/prompt-files
 temperature: 0.0
 ---
 {{{ diff }}}
@@ -126,6 +133,7 @@ export function slashCommandFromPromptFile(
             provider.description.title,
             async (context: any) => {
               const items = await provider.getContextItems(context, {
+                config,
                 embeddingsProvider: config.embeddingsProvider,
                 fetch,
                 fullInput: userInput,

@@ -1,3 +1,4 @@
+import { ControlPlaneSessionInfo } from "../control-plane/client.js";
 import type {
   ContinueRcJson,
   DiffLine,
@@ -5,18 +6,16 @@ import type {
   IdeInfo,
   IdeSettings,
   IndexTag,
+  Location,
   Problem,
   Range,
+  RangeInFile,
   Thread,
-} from "..";
+} from "../index.js";
 
 export type ToIdeFromWebviewOrCoreProtocol = {
   // Methods from IDE type
   getIdeInfo: [undefined, IdeInfo];
-  listWorkspaceContents: [
-    { directory?: string; useGitIgnore?: boolean },
-    string[],
-  ];
   getWorkspaceDirs: [undefined, string[]];
   listFolders: [undefined, string[]];
   writeFile: [{ path: string; contents: string }, void];
@@ -27,6 +26,7 @@ export type ToIdeFromWebviewOrCoreProtocol = {
   getSearchResults: [{ query: string }, string];
   subprocess: [{ command: string }, [string, string]];
   saveFile: [{ filepath: string }, void];
+  fileExists: [{ filepath: string }, boolean];
   readFile: [{ filepath: string }, string];
   showDiff: [
     { filepath: string; newContents: string; stepIndex: number },
@@ -73,5 +73,21 @@ export type ToIdeFromWebviewOrCoreProtocol = {
   listDir: [{ dir: string }, [string, FileType][]];
   getLastModified: [{ files: string[] }, { [path: string]: number }];
 
+  gotoDefinition: [{ location: Location }, RangeInFile[]];
+
   getGitHubAuthToken: [undefined, string | undefined];
+  getControlPlaneSessionInfo: [
+    { silent: boolean },
+    ControlPlaneSessionInfo | undefined,
+  ];
+  logoutOfControlPlane: [undefined, void];
+  pathSep: [undefined, string];
+};
+
+export type ToWebviewOrCoreFromIdeProtocol = {
+  didChangeActiveTextEditor: [{ filepath: string }, void];
+  didChangeControlPlaneSessionInfo: [
+    { sessionInfo: ControlPlaneSessionInfo | undefined },
+    void,
+  ];
 };

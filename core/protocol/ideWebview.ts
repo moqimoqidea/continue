@@ -1,5 +1,5 @@
-import type { ContextSubmenuItem } from "..";
-import type { RangeInFileWithContents } from "../commands/util";
+import type { RangeInFileWithContents } from "../commands/util.js";
+import type { ContextSubmenuItem } from "../index.js";
 import { ToIdeFromWebviewOrCoreProtocol } from "./ide.js";
 import { ToWebviewFromIdeOrCoreProtocol } from "./webview.js";
 
@@ -41,7 +41,14 @@ export type ToWebviewFromIdeProtocol = ToWebviewFromIdeOrCoreProtocol & {
   focusContinueInput: [undefined, void];
   focusContinueInputWithoutClear: [undefined, void];
   focusContinueInputWithNewSession: [undefined, void];
-  highlightedCode: [{ rangeInFileWithContents: RangeInFileWithContents }, void];
+  highlightedCode: [
+    {
+      rangeInFileWithContents: RangeInFileWithContents;
+      prompt?: string;
+      shouldRun?: boolean;
+    },
+    void,
+  ];
   addModel: [undefined, void];
   openSettings: [undefined, void];
   viewHistory: [undefined, void];

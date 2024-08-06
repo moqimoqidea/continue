@@ -1,4 +1,9 @@
-import { FromCoreProtocol, ToCoreProtocol } from "core/protocol";
+import { ConfigHandler } from "core/config/ConfigHandler";
+import {
+  FromCoreProtocol,
+  FromWebviewProtocol,
+  ToCoreProtocol,
+} from "core/protocol";
 import { ToWebviewFromCoreProtocol } from "core/protocol/coreWebview";
 import { ToIdeFromWebviewOrCoreProtocol } from "core/protocol/ide";
 import { ToIdeFromCoreProtocol } from "core/protocol/ideCore";
@@ -13,11 +18,12 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import { VerticalPerLineDiffManager } from "../diff/verticalPerLine/manager";
 import { VsCodeIde } from "../ideProtocol";
-import { getExtensionUri } from "../util/vscode";
 import {
-  ToCoreOrIdeFromWebviewProtocol,
-  VsCodeWebviewProtocol,
-} from "../webviewProtocol";
+  getControlPlaneSessionInfo,
+  WorkOsAuthProvider,
+} from "../stubs/WorkOsAuthProvider";
+import { getExtensionUri } from "../util/vscode";
+import { VsCodeWebviewProtocol } from "../webviewProtocol";
 
 /**
  * A shared messenger class between Core and Webview
@@ -27,13 +33,11 @@ type TODO = any;
 type ToIdeOrWebviewFromCoreProtocol = ToIdeFromCoreProtocol &
   ToWebviewFromCoreProtocol;
 export class VsCodeMessenger {
-  onWebview<T extends keyof ToCoreOrIdeFromWebviewProtocol>(
+  onWebview<T extends keyof FromWebviewProtocol>(
     messageType: T,
     handler: (
-      message: Message<ToCoreOrIdeFromWebviewProtocol[T][0]>,
-    ) =>
-      | Promise<ToCoreOrIdeFromWebviewProtocol[T][1]>
-      | ToCoreOrIdeFromWebviewProtocol[T][1],
+      message: Message<FromWebviewProtocol[T][0]>,
+    ) => Promise<FromWebviewProtocol[T][1]> | FromWebviewProtocol[T][1],
   ): void {
     this.webviewProtocol.on(messageType, handler);
   }
@@ -69,6 +73,8 @@ export class VsCodeMessenger {
     private readonly webviewProtocol: VsCodeWebviewProtocol,
     private readonly ide: VsCodeIde,
     private readonly verticalDiffManagerPromise: Promise<VerticalPerLineDiffManager>,
+    private readonly configHandlerPromise: Promise<ConfigHandler>,
+    private readonly workOsAuthProvider: WorkOsAuthProvider,
   ) {
     /** WEBVIEW ONLY LISTENERS **/
     this.onWebview("showFile", (msg) => {
@@ -116,9 +122,11 @@ export class VsCodeMessenger {
         msg.data.stepIndex,
       );
     });
+
     this.onWebview("applyToCurrentFile", async (msg) => {
       // Select the entire current file
       const editor = vscode.window.activeTextEditor;
+
       if (!editor) {
         vscode.window.showErrorMessage("No active editor to apply edits to");
         return;
@@ -134,11 +142,19 @@ export class VsCodeMessenger {
         editor.selection = new vscode.Selection(start, end);
       }
 
-      (await this.verticalDiffManagerPromise).streamEdit(
-        `The following code was suggested as an edit:\n\`\`\`\n${msg.data.text}\n\`\`\`\nPlease apply it to the previous code.`,
-        await this.webviewProtocol.request("getDefaultModelTitle", undefined),
-      );
+      const verticalDiffManager = await this.verticalDiffManagerPromise;
+      const prompt = `The following code was suggested as an edit:\n\`\`\`\n${msg.data.text}\n\`\`\`\nPlease apply it to the previous code.`;
+
+      const configHandler = await configHandlerPromise;
+      const config = await configHandler.loadConfig();
+
+      const modelTitle =
+        config.experimental?.modelRoles?.applyCodeBlock ??
+        (await this.webviewProtocol.request("getDefaultModelTitle", undefined));
+
+      verticalDiffManager.streamEdit(prompt, modelTitle);
     });
+
     this.onWebview("showTutorial", async (msg) => {
       const tutorialPath = path.join(
         getExtensionUri().fsPath,
@@ -182,6 +198,7 @@ export class VsCodeMessenger {
         return (await this.inProcessMessenger.externalRequest(
           messageType,
           msg.data,
+          msg.messageId,
         )) as TODO;
       });
     });
@@ -216,12 +233,6 @@ export class VsCodeMessenger {
       return ide.getTopLevelCallStackSources(
         msg.data.threadIndex,
         msg.data.stackDepth,
-      );
-    });
-    this.onWebviewOrCore("listWorkspaceContents", async (msg) => {
-      return ide.listWorkspaceContents(
-        msg.data.directory,
-        msg.data.useGitIgnore,
       );
     });
     this.onWebviewOrCore("getWorkspaceDirs", async (msg) => {
@@ -281,8 +292,20 @@ export class VsCodeMessenger {
           }
         });
     });
+    this.onWebviewOrCore("infoPopup", (msg) => {
+      vscode.window.showInformationMessage(msg.data.message);
+    });
     this.onWebviewOrCore("getGitHubAuthToken", (msg) =>
       ide.getGitHubAuthToken(),
     );
+    this.onWebviewOrCore("getControlPlaneSessionInfo", async (msg) => {
+      return getControlPlaneSessionInfo(msg.data.silent);
+    });
+    this.onWebviewOrCore("logoutOfControlPlane", async (msg) => {
+      const sessions = await this.workOsAuthProvider.getSessions();
+      await Promise.all(
+        sessions.map((session) => workOsAuthProvider.removeSession(session.id)),
+      );
+    });
   }
 }

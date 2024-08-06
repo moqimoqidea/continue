@@ -1,3 +1,4 @@
+import { findLlmInfo } from "@continuedev/llm-info";
 import Handlebars from "handlebars";
 import {
   ChatMessage,
@@ -6,6 +7,7 @@ import {
   ILLM,
   LLMFullCompletionOptions,
   LLMOptions,
+  ModelCapability,
   ModelName,
   ModelProvider,
   PromptLog,
@@ -35,9 +37,9 @@ import {
   compileChatMessages,
   countTokens,
   pruneRawPromptFromTop,
-  stripImages,
 } from "./countTokens.js";
 import CompletionOptionsForModels from "./templates/options.js";
+import { stripImages } from "./images.js";
 
 export abstract class BaseLLM implements ILLM {
   static providerName: ModelProvider;
@@ -52,7 +54,7 @@ export abstract class BaseLLM implements ILLM {
   }
 
   supportsImages(): boolean {
-    return modelSupportsImages(this.providerName, this.model, this.title);
+    return modelSupportsImages(this.providerName, this.model, this.title, this.capabilities);
   }
 
   supportsCompletions(): boolean {
@@ -93,6 +95,7 @@ export abstract class BaseLLM implements ILLM {
   llmRequestHook?: (model: string, prompt: string) => any;
   apiKey?: string;
   apiBase?: string;
+  capabilities?: ModelCapability
 
   engine?: string;
   apiVersion?: string;
@@ -101,6 +104,16 @@ export abstract class BaseLLM implements ILLM {
   projectId?: string;
   accountId?: string;
   aiGatewaySlug?: string;
+
+  // For WatsonX only.
+
+  watsonxUrl?: string;
+  watsonxApiKey?: string;
+  watsonxZenApiKeyBase64?:string = "YOUR_WATSONX_ZENAPIKEY" // Required if using watsonx software with ZenApiKey auth
+  watsonxUsername?:string;
+  watsonxPassword?:string;
+  watsonxProjectId?: string;
+
 
   private _llmOptions: LLMOptions;
 
@@ -114,14 +127,17 @@ export abstract class BaseLLM implements ILLM {
       ..._options,
     };
 
+    this.model = options.model;
+    const llmInfo = findLlmInfo(this.model);
+
     const templateType =
       options.template ?? autodetectTemplateType(options.model);
 
     this.title = options.title;
     this.uniqueId = options.uniqueId ?? "None";
-    this.model = options.model;
     this.systemMessage = options.systemMessage;
-    this.contextLength = options.contextLength ?? DEFAULT_CONTEXT_LENGTH;
+    this.contextLength =
+      options.contextLength ?? llmInfo?.contextLength ?? DEFAULT_CONTEXT_LENGTH;
     this.completionOptions = {
       ...options.completionOptions,
       model: options.model || "gpt-4",
@@ -150,10 +166,18 @@ export abstract class BaseLLM implements ILLM {
     this.apiKey = options.apiKey;
     this.aiGatewaySlug = options.aiGatewaySlug;
     this.apiBase = options.apiBase;
+    // for watsonx only
+    this.watsonxUrl = options.watsonxUrl;
+    this.watsonxApiKey = options.watsonxApiKey;
+    this.watsonxProjectId = options.watsonxProjectId;
+    this.watsonxUsername = options.watsonxUsername;
+    this.watsonxPassword = options.watsonxPassword;
+
     if (this.apiBase && !this.apiBase.endsWith("/")) {
       this.apiBase = `${this.apiBase}/`;
     }
     this.accountId = options.accountId;
+    this.capabilities = options.capabilities;
 
     this.engine = options.engine;
     this.apiVersion = options.apiVersion;
@@ -235,12 +259,16 @@ ${prompt}`;
   ) {
     let promptTokens = this.countTokens(prompt);
     let generatedTokens = this.countTokens(completion);
-    Telemetry.capture("tokens_generated", {
-      model: model,
-      provider: this.providerName,
-      promptTokens: promptTokens,
-      generatedTokens: generatedTokens,
-    });
+    Telemetry.capture(
+      "tokens_generated",
+      {
+        model: model,
+        provider: this.providerName,
+        promptTokens: promptTokens,
+        generatedTokens: generatedTokens,
+      },
+      true,
+    );
     DevDataSqliteDb.logTokensGenerated(
       model,
       this.providerName,

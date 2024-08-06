@@ -1,9 +1,8 @@
 import type { FileEdit, RangeInFile, Thread } from "core";
-import { defaultIgnoreFile } from "core/indexing/ignore";
 import path from "node:path";
 import * as vscode from "vscode";
 import { threadStopped } from "../debug/debug";
-import { VsCodeExtension } from "../extension/vscodeExtension";
+import { VsCodeExtension } from "../extension/VsCodeExtension";
 import { GitExtension, Repository } from "../otherExtensions/git";
 import {
   SuggestionRanges,
@@ -12,12 +11,13 @@ import {
   rejectSuggestionCommand,
   showSuggestion as showSuggestionInEditor,
 } from "../suggestions";
-import { traverseDirectory } from "./traverseDirectory";
 import {
   getUniqueId,
   openEditorAndRevealRange,
   uriFromFilePath,
 } from "./vscode";
+
+import _ from "lodash";
 
 const util = require("node:util");
 const asyncExec = util.promisify(require("node:child_process").exec);
@@ -257,46 +257,27 @@ export class VsCodeIdeUtils {
       });
   }
 
-  async getDirectoryContents(
-    directory: string,
-    recursive: boolean,
-    useGitIgnore: boolean,
-  ): Promise<string[]> {
-    if (!recursive) {
-      return (
-        await vscode.workspace.fs.readDirectory(uriFromFilePath(directory))
-      )
-        .filter(([name, type]) => {
-          type === vscode.FileType.File && !defaultIgnoreFile.ignores(name);
-        })
-        .map(([name, type]) => path.join(directory, name));
+  private _cachedPath: path.PlatformPath | undefined;
+  get path(): path.PlatformPath {
+    if (this._cachedPath) {
+      return this._cachedPath;
     }
 
-    const allFiles: string[] = [];
-    const gitRoot = await this.getGitRoot(directory);
-    let onlyThisDirectory = undefined;
-    if (gitRoot) {
-      onlyThisDirectory = directory.slice(gitRoot.length).split(path.sep);
-      if (onlyThisDirectory[0] === "") {
-        onlyThisDirectory.shift();
-      }
-    }
-    for await (const file of traverseDirectory(
-      gitRoot ?? directory,
-      [],
-      true,
-      gitRoot === directory ? undefined : onlyThisDirectory,
-      useGitIgnore,
-    )) {
-      allFiles.push(file);
-    }
-    return allFiles;
+    // Return "path" module for either windows or posix depending on sample workspace folder path format
+    const sampleWorkspaceFolder =
+      vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const isWindows = sampleWorkspaceFolder
+      ? !sampleWorkspaceFolder.startsWith("/")
+      : false;
+
+    this._cachedPath = isWindows ? path.win32 : path.posix;
+    return this._cachedPath;
   }
 
   getAbsolutePath(filepath: string): string {
     const workspaceDirectories = this.getWorkspaceDirectories();
-    if (!path.isAbsolute(filepath) && workspaceDirectories.length === 1) {
-      return path.join(workspaceDirectories[0], filepath);
+    if (!this.path.isAbsolute(filepath) && workspaceDirectories.length === 1) {
+      return this.path.join(workspaceDirectories[0], filepath);
     } else {
       return filepath;
     }
@@ -485,7 +466,9 @@ export class VsCodeIdeUtils {
 
             const scope = scopeResponse.scopes[0];
 
-            return await this.retrieveSource(scope.source ? scope : stackFrame);
+            return await this.retrieveSource(
+              scope.source && !_.isEmpty(scope.source) ? scope : stackFrame,
+            );
           }),
       );
 
@@ -520,7 +503,7 @@ export class VsCodeIdeUtils {
       return await this.readRangeInFile(
         sourceContainer.source.path,
         new vscode.Range(
-          sourceContainer.line - 3,
+          Math.max(0, sourceContainer.line - 3),
           0,
           sourceContainer.line + 2,
           0,
@@ -555,6 +538,8 @@ export class VsCodeIdeUtils {
 
   private _repoWasNone: boolean = false;
   private repoCache: Map<string, Repository> = new Map();
+  private static secondsToWaitForGitToLoad =
+    process.env.NODE_ENV === "test" ? 1 : 20;
   async getRepo(forDirectory: vscode.Uri): Promise<Repository | undefined> {
     const workspaceDirs = this.getWorkspaceDirectories();
     const parentDir = workspaceDirs.find((dir) =>
@@ -576,7 +561,7 @@ export class VsCodeIdeUtils {
 
       await new Promise((resolve) => setTimeout(resolve, 1000));
       i++;
-      if (i >= 20) {
+      if (i >= VsCodeIdeUtils.secondsToWaitForGitToLoad) {
         this._repoWasNone = true;
         return undefined;
       }

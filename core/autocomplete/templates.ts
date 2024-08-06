@@ -19,6 +19,7 @@ interface AutocompleteTemplate {
         suffix: string,
         filepath: string,
         reponame: string,
+        language: string,
         snippets: AutocompleteSnippet[],
       ) => string);
   completionOptions?: Partial<CompletionOptions>;
@@ -34,6 +35,8 @@ const stableCodeFimTemplate: AutocompleteTemplate = {
       "<fim_middle>",
       "<|endoftext|>",
       "<file_sep>",
+      "</fim_middle>",
+      "</code>",
     ],
   },
 };
@@ -76,6 +79,7 @@ const codestralMultifileFimTemplate: AutocompleteTemplate = {
     suffix: string,
     filepath: string,
     reponame: string,
+    language: string,
     snippets: AutocompleteSnippet[],
   ): string => {
     return `[SUFFIX]${suffix}[PREFIX]${prefix}`;
@@ -107,6 +111,7 @@ const starcoder2FimTemplate: AutocompleteTemplate = {
     suffix: string,
     filename: string,
     reponame: string,
+    language: string,
     snippets: AutocompleteSnippet[],
   ): string => {
     const otherFiles =
@@ -153,9 +158,40 @@ const deepseekFimTemplate: AutocompleteTemplate = {
   },
 };
 
-const deepseekFimTemplateWrongPipeChar: AutocompleteTemplate = {
-  template: "<|fim▁begin|>{{{prefix}}}<|fim▁hole|>{{{suffix}}}<|fim▁end|>",
-  completionOptions: { stop: ["<|fim▁begin|>", "<|fim▁hole|>", "<|fim▁end|>"] },
+// https://github.com/THUDM/CodeGeeX4/blob/main/guides/Infilling_guideline.md
+const codegeexFimTemplate: AutocompleteTemplate = {
+  template: (
+    prefix: string,
+    suffix: string,
+    filepath: string,
+    reponame: string,
+    language: string,
+    snippets: AutocompleteSnippet[],
+  ): string => {
+    const relativePaths = shortestRelativePaths([
+      ...snippets.map((snippet) => snippet.filepath),
+      filepath,
+    ]);
+    const baseTemplate = `###PATH:${relativePaths[relativePaths.length - 1]}\n###LANGUAGE:${language}\n###MODE:BLOCK\n<|code_suffix|>${suffix}<|code_prefix|>${prefix}<|code_middle|>`;
+    if (snippets.length == 0) {
+      return `<|user|>\n${baseTemplate}<|assistant|>\n`;
+    }
+    const references = `###REFERENCE:\n${snippets
+      .map((snippet, i) => `###PATH:${relativePaths[i]}\n${snippet.contents}\n`)
+      .join("###REFERENCE:\n")}`;
+    const prompt = `<|user|>\n${references}\n${baseTemplate}<|assistant|>\n`;
+    return prompt;
+  },
+  completionOptions: {
+    stop: [
+      "<|user|>",
+      "<|code_suffix|>",
+      "<|code_prefix|>",
+      "<|code_middle|>",
+      "<|assistant|>",
+      "<|endoftext|>",
+    ],
+  },
 };
 
 const gptAutocompleteTemplate: AutocompleteTemplate = {
@@ -173,6 +209,7 @@ const holeFillerTemplate: AutocompleteTemplate = {
     suffix: string,
     filename: string,
     reponame: string,
+    language: string,
     snippets: AutocompleteSnippet[],
   ) => {
     // From https://github.com/VictorTaelin/AI-scripts
@@ -303,6 +340,10 @@ export function getTemplateForModel(model: string): AutocompleteTemplate {
 
   if (lowerCaseModel.includes("deepseek")) {
     return deepseekFimTemplate;
+  }
+
+  if (lowerCaseModel.includes("codegeex")) {
+    return codegeexFimTemplate;
   }
 
   if (

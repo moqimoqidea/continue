@@ -2,6 +2,7 @@ import {
   ToCoreFromWebviewProtocol,
   ToWebviewFromCoreProtocol,
 } from "./coreWebview.js";
+import { ToWebviewOrCoreFromIdeProtocol } from "./ide.js";
 import { ToCoreFromIdeProtocol, ToIdeFromCoreProtocol } from "./ideCore.js";
 import {
   ToIdeFromWebviewProtocol,
@@ -12,15 +13,20 @@ export type IProtocol = Record<string, [any, any]>;
 
 // IDE
 export type ToIdeProtocol = ToIdeFromWebviewProtocol & ToIdeFromCoreProtocol;
-export type FromIdeProtocol = ToWebviewFromIdeProtocol & ToCoreFromIdeProtocol;
+export type FromIdeProtocol = ToWebviewFromIdeProtocol &
+  ToCoreFromIdeProtocol &
+  ToWebviewOrCoreFromIdeProtocol;
 
 // Webview
 export type ToWebviewProtocol = ToWebviewFromIdeProtocol &
-  ToWebviewFromCoreProtocol;
+  ToWebviewFromCoreProtocol &
+  ToWebviewOrCoreFromIdeProtocol;
 export type FromWebviewProtocol = ToIdeFromWebviewProtocol &
   ToCoreFromWebviewProtocol;
 
 // Core
-export type ToCoreProtocol = ToCoreFromIdeProtocol | ToCoreFromWebviewProtocol;
+export type ToCoreProtocol = ToCoreFromIdeProtocol &
+  ToCoreFromWebviewProtocol &
+  ToWebviewOrCoreFromIdeProtocol;
 export type FromCoreProtocol = ToWebviewFromCoreProtocol &
   ToIdeFromCoreProtocol;

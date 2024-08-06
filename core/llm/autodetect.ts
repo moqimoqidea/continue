@@ -1,4 +1,4 @@
-import { ModelProvider, TemplateType } from "../index.js";
+import { ModelCapability, ModelProvider, TemplateType } from "../index.js";
 import {
   anthropicTemplateMessages,
   chatmlTemplateMessages,
@@ -39,6 +39,7 @@ const PROVIDER_HANDLES_TEMPLATING: ModelProvider[] = [
   "openai",
   "ollama",
   "together",
+  "msty",
   "anthropic",
   "bedrock",
   "continue-proxy",
@@ -50,6 +51,7 @@ const PROVIDER_SUPPORTS_IMAGES: ModelProvider[] = [
   "ollama",
   "gemini",
   "free-trial",
+  "msty",
   "anthropic",
   "bedrock",
   "continue-proxy",
@@ -59,6 +61,7 @@ const MODEL_SUPPORTS_IMAGES: string[] = [
   "llava",
   "gpt-4-turbo",
   "gpt-4o",
+  "gpt-4o-mini",
   "gpt-4-vision",
   "claude-3",
   "gemini-ultra",
@@ -73,7 +76,9 @@ function modelSupportsImages(
   provider: ModelProvider,
   model: string,
   title: string | undefined,
+  capabilities: ModelCapability | undefined
 ): boolean {
+  if (capabilities?.uploadImage !== undefined) return capabilities.uploadImage
   if (!PROVIDER_SUPPORTS_IMAGES.includes(provider)) {
     return false;
   }

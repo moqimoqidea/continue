@@ -9,21 +9,23 @@ import type {
   IdeInfo,
   IdeSettings,
   IndexTag,
+  Location,
   Problem,
+  RangeInFile,
   Thread,
 } from "core";
 import { Range } from "core";
-import { defaultIgnoreFile } from "core/indexing/ignore";
+import { walkDir } from "core/indexing/walkDir";
 import {
   editConfigJson,
   getConfigJsonPath,
   getContinueGlobalPath,
 } from "core/util/paths";
 import * as vscode from "vscode";
+import { executeGotoProvider } from "./autocomplete/lsp";
 import { DiffManager } from "./diff/horizontal";
 import { Repository } from "./otherExtensions/git";
 import { VsCodeIdeUtils } from "./util/ideUtils";
-import { traverseDirectory } from "./util/traverseDirectory";
 import {
   getExtensionUri,
   openEditorAndRevealRange,
@@ -39,6 +41,34 @@ class VsCodeIde implements IDE {
     private readonly vscodeWebviewProtocolPromise: Promise<VsCodeWebviewProtocol>,
   ) {
     this.ideUtils = new VsCodeIdeUtils();
+  }
+  pathSep(): Promise<string> {
+    return Promise.resolve(this.ideUtils.path.sep);
+  }
+  async fileExists(filepath: string): Promise<boolean> {
+    return vscode.workspace.fs.stat(uriFromFilePath(filepath)).then(
+      () => true,
+      () => false,
+    );
+  }
+
+  async gotoDefinition(location: Location): Promise<RangeInFile[]> {
+    const result = await executeGotoProvider({
+      uri: location.filepath,
+      line: location.position.line,
+      character: location.position.character,
+      name: "vscode.executeDefinitionProvider",
+    });
+
+    return result;
+  }
+
+  onDidChangeActiveTextEditor(callback: (filepath: string) => void): void {
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
+      if (editor) {
+        callback(editor.document.uri.fsPath);
+      }
+    });
   }
 
   private authToken: string | undefined;
@@ -240,12 +270,14 @@ class VsCodeIde implements IDE {
   }
 
   async isTelemetryEnabled(): Promise<boolean> {
-    return (
+    const globalEnabled = vscode.env.isTelemetryEnabled;
+    const continueEnabled: boolean =
       (await vscode.workspace
         .getConfiguration("continue")
-        .get("telemetryEnabled")) ?? true
-    );
+        .get("telemetryEnabled")) ?? true;
+    return globalEnabled && continueEnabled;
   }
+
   getUniqueId(): Promise<string> {
     return Promise.resolve(vscode.env.machineId);
   }
@@ -275,27 +307,6 @@ class VsCodeIde implements IDE {
     return await this.ideUtils.getAvailableThreads();
   }
 
-  async listWorkspaceContents(
-    directory?: string,
-    useGitIgnore?: boolean,
-  ): Promise<string[]> {
-    if (directory) {
-      return await this.ideUtils.getDirectoryContents(
-        directory,
-        true,
-        useGitIgnore ?? true,
-      );
-    }
-    const contents = await Promise.all(
-      this.ideUtils
-        .getWorkspaceDirectories()
-        .map((dir) =>
-          this.ideUtils.getDirectoryContents(dir, true, useGitIgnore ?? true),
-        ),
-    );
-    return contents.flat();
-  }
-
   async getWorkspaceConfigs() {
     const workspaceDirs =
       vscode.workspace.workspaceFolders?.map((folder) => folder.uri) || [];
@@ -319,15 +330,8 @@ class VsCodeIde implements IDE {
 
     const workspaceDirs = await this.getWorkspaceDirs();
     for (const directory of workspaceDirs) {
-      for await (const dir of traverseDirectory(
-        directory,
-        [],
-        false,
-        undefined,
-        true,
-      )) {
-        allDirs.push(dir);
-      }
+      const dirs = await walkDir(directory, this, { onlyDirs: true });
+      allDirs.push(...dirs);
     }
 
     return allDirs;
@@ -502,12 +506,7 @@ class VsCodeIde implements IDE {
   }
 
   async listDir(dir: string): Promise<[string, FileType][]> {
-    const files = await vscode.workspace.fs.readDirectory(uriFromFilePath(dir));
-    return files
-      .filter(([name, type]) => {
-        !(type === vscode.FileType.File && defaultIgnoreFile.ignores(name));
-      })
-      .map(([name, type]) => [path.join(dir, name), type]) as any;
+    return vscode.workspace.fs.readDirectory(uriFromFilePath(dir)) as any;
   }
 
   getIdeSettingsSync(): IdeSettings {
@@ -523,6 +522,19 @@ class VsCodeIde implements IDE {
         60,
       ),
       userToken: settings.get<string>("userToken", ""),
+      enableControlServerBeta: settings.get<boolean>(
+        "enableContinueForTeams",
+        false,
+      ),
+      pauseCodebaseIndexOnStart: settings.get<boolean>(
+        "pauseCodebaseIndexOnStart",
+        false,
+      ),
+      enableDebugLogs: settings.get<boolean>("enableDebugLogs", false),
+      // settings.get<boolean>(
+      //   "enableControlServerBeta",
+      //   false,
+      // ),
     };
     return ideSettings;
   }

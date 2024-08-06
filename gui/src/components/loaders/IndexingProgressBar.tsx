@@ -1,4 +1,5 @@
 import { IndexingProgressUpdate } from "core";
+import TransformersJsEmbeddingsProvider from "core/indexing/embeddings/TransformersJsEmbeddingsProvider";
 import { useContext, useEffect, useState } from "react";
 import ReactDOM from "react-dom";
 import { useSelector } from "react-redux";
@@ -7,22 +8,22 @@ import { StyledTooltip, lightGray, vscForeground } from "..";
 import { IdeMessengerContext } from "../../context/IdeMessenger";
 import { RootState } from "../../redux/store";
 import { getFontSize, isJetBrains } from "../../util";
+import StatusDot from "./StatusDot";
 
-const DIAMETER = 6;
-const CircleDiv = styled.div<{ color: string }>`
-  background-color: ${(props) => props.color};
-  box-shadow: 0px 0px 2px 1px ${(props) => props.color};
-  width: ${DIAMETER}px;
-  height: ${DIAMETER}px;
-  border-radius: ${DIAMETER / 2}px;
-`;
+const STATUS_COLORS = {
+  DISABLED: lightGray, // light gray
+  LOADING: "#00B8D9", // ice blue
+  INDEXING: "#6554C0", // purple
+  PAUSED: "#FFAB00", // yellow
+  DONE: "#36B37E", // green
+  FAILED: "#FF5630", // red
+};
 
 const ProgressBarWrapper = styled.div`
   width: 100px;
   height: 6px;
   border-radius: 6px;
   border: 0.5px solid ${lightGray};
-  margin-top: 6px;
 `;
 
 const ProgressBarFill = styled.div<{ completed: number; color?: string }>`
@@ -33,23 +34,32 @@ const ProgressBarFill = styled.div<{ completed: number; color?: string }>`
   width: ${(props) => props.completed}%;
 `;
 
-const GridDiv = styled.div`
-  display: grid;
-  grid-template-rows: 1fr auto;
+const FlexDiv = styled.div`
+  display: flex;
   align-items: center;
-  justify-items: center;
-  margin-left: 8px;
+  gap: 6px;
+  overflow: hidden;
 `;
 
-const P = styled.p`
-  margin: 0;
-  margin-top: 2px;
-  font-size: ${getFontSize() - 2.5}px;
+const StatusHeading = styled.div`
   color: ${lightGray};
-  text-align: center;
+  font-size: ${getFontSize() - 2.4}px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+
+  @media (max-width: 400px) {
+    display: none;
+  }
+`;
+
+const StatusInfo = styled.div`
+  font-size: ${getFontSize() - 3.6}px;
+  color: ${lightGray};
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
 `;
 
 interface ProgressBarProps {
@@ -99,7 +109,10 @@ const IndexingProgressBar = ({
   }, [paused]);
 
   function getIndexingErrMsg(msg: string): string {
-    if (isJetBrains() && embeddingsProvider === "all-MiniLM-L6-v2") {
+    if (
+      isJetBrains() &&
+      embeddingsProvider === TransformersJsEmbeddingsProvider.model
+    ) {
       return "The 'transformers.js' embeddingsProvider is currently unsupported in JetBrains. To enable codebase indexing, you can use any of the other providers described in the docs: https://docs.continue.dev/walkthroughs/codebase-embeddings#embeddings-providers";
     }
     return msg;
@@ -120,108 +133,92 @@ const IndexingProgressBar = ({
       }}
       className="cursor-pointer"
     >
-      {indexingState.status === "failed" ? ( //red 'failed' dot
-        <>
-          <CircleDiv
-            data-tooltip-id="indexingFailed_dot"
-            color="#ff0000"
-          ></CircleDiv>
+      {indexingState.status === "failed" ? (
+        <FlexDiv data-tooltip-id="indexingFailed_dot">
+          <StatusDot color={STATUS_COLORS.FAILED}></StatusDot>
+          <div>
+            <StatusHeading>Indexing error - click to retry</StatusHeading>
+            <StatusInfo>{getIndexingErrMsg(indexingState.desc)}</StatusInfo>
+          </div>
           {tooltipPortalDiv &&
             ReactDOM.createPortal(
               <StyledTooltip id="indexingFailed_dot" place="top">
-                Error indexing codebase: {getIndexingErrMsg(indexingState.desc)}
+                {getIndexingErrMsg(indexingState.desc)}
+              </StyledTooltip>,
+              tooltipPortalDiv,
+            )}
+        </FlexDiv>
+      ) : indexingState.status === "loading" ? (
+        <FlexDiv>
+          <StatusDot shouldBlink color={STATUS_COLORS.LOADING}></StatusDot>
+          <StatusHeading>Initializing</StatusHeading>
+        </FlexDiv>
+      ) : indexingState.status === "done" ? (
+        <FlexDiv data-tooltip-id="indexingDone_dot">
+          <StatusDot color={STATUS_COLORS.DONE}></StatusDot>
+          <div>
+            <StatusHeading>Index up to date</StatusHeading>
+          </div>
+          {tooltipPortalDiv &&
+            ReactDOM.createPortal(
+              <StyledTooltip id="indexingDone_dot" place="top">
+                Index up to date
                 <br />
-                Click to retry
+                Click to force re-indexing
               </StyledTooltip>,
               tooltipPortalDiv,
             )}
-        </>
-      ) : indexingState.status === "loading" ? ( // ice-blue 'indexing loading' dot
-        <>
-          <CircleDiv
-            data-tooltip-id="indexingNotLoaded_dot"
-            color="#72aec2"
-          ></CircleDiv>
+        </FlexDiv>
+      ) : indexingState.status === "disabled" ? (
+        <FlexDiv data-tooltip-id="indexingDisabled_dot">
+          <StatusDot color={STATUS_COLORS.DISABLED}></StatusDot>
           {tooltipPortalDiv &&
             ReactDOM.createPortal(
-              <StyledTooltip id="indexingNotLoaded_dot" place="top">
-                Continue is initializing
-              </StyledTooltip>,
-              tooltipPortalDiv,
-            )}
-        </>
-      ) : indexingState.status === "done" ? ( //indexing complete green dot
-        <>
-          <CircleDiv data-tooltip-id="progress_dot" color="#090"></CircleDiv>
-          {tooltipPortalDiv &&
-            ReactDOM.createPortal(
-              <StyledTooltip id="progress_dot" place="top">
-                Index up to date. Click to force re-indexing
-              </StyledTooltip>,
-              tooltipPortalDiv,
-            )}
-        </>
-      ) : indexingState.status === "disabled" ? ( //gray disabled dot
-        <>
-          <CircleDiv
-            data-tooltip-id="progress_dot"
-            color={lightGray}
-          ></CircleDiv>
-          {tooltipPortalDiv &&
-            ReactDOM.createPortal(
-              <StyledTooltip id="progress_dot" place="top">
+              <StyledTooltip id="indexingDisabled_dot" place="top">
                 {indexingState.desc}
               </StyledTooltip>,
               tooltipPortalDiv,
             )}
-        </>
+        </FlexDiv>
       ) : indexingState.status === "paused" ||
         (paused && indexingState.status === "indexing") ? (
-        //yellow 'paused' dot
-        <>
-          <CircleDiv
-            data-tooltip-id="progress_dot"
-            color="#bb0"
+        <FlexDiv>
+          <StatusDot
+            color={STATUS_COLORS.PAUSED}
             onClick={(e) => {
               ideMessenger.post("index/setPaused", false);
             }}
-          ></CircleDiv>
-          {tooltipPortalDiv &&
-            ReactDOM.createPortal(
-              <StyledTooltip id="progress_dot" place="top">
-                Click to unpause indexing (
-                {Math.trunc(indexingState.progress * 100)}%)
-              </StyledTooltip>,
-              tooltipPortalDiv,
-            )}
-        </>
-      ) : indexingState.status === "indexing" ? ( //progress bar
-        <>
-          <GridDiv
-            data-tooltip-id="usage_progress_bar"
-            onMouseEnter={() => setHovered(true)}
-            onMouseLeave={() => setHovered(false)}
-            onClick={(e) => {
-              ideMessenger.post("index/setPaused", true);
-            }}
-          >
-            <ProgressBarWrapper>
-              <ProgressBarFill completed={fillPercentage} />
-            </ProgressBarWrapper>
-            <P>
-              {hovered
-                ? "Click to pause"
-                : `Indexing (${Math.trunc(indexingState.progress * 100)}%)`}
-            </P>
-          </GridDiv>
-          {tooltipPortalDiv &&
-            ReactDOM.createPortal(
-              <StyledTooltip id="usage_progress_bar" place="top">
-                {indexingState.desc}
-              </StyledTooltip>,
-              tooltipPortalDiv,
-            )}
-        </>
+          ></StatusDot>
+          <StatusHeading>
+            Indexing paused ({Math.trunc(indexingState.progress * 100)}
+            %)
+          </StatusHeading>
+        </FlexDiv>
+      ) : indexingState.status === "indexing" ? (
+        <FlexDiv
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+          onClick={(e) => {
+            ideMessenger.post("index/setPaused", true);
+          }}
+        >
+          <StatusDot shouldBlink color={STATUS_COLORS.INDEXING}></StatusDot>
+          <div>
+            <FlexDiv>
+              <ProgressBarWrapper>
+                <ProgressBarFill completed={fillPercentage} />
+              </ProgressBarWrapper>
+
+              <StatusHeading
+                style={{ fontSize: `${getFontSize() - 3}px` }}
+              >{`${Math.trunc(indexingState.progress * 100)}%`}</StatusHeading>
+            </FlexDiv>
+
+            <StatusInfo>
+              {hovered ? "Click to pause" : indexingState.desc}
+            </StatusInfo>
+          </div>
+        </FlexDiv>
       ) : null}
     </div>
   );

@@ -1,6 +1,8 @@
 package com.github.continuedev.continueintellijextension.`continue`
 
 import com.github.continuedev.continueintellijextension.*
+import com.github.continuedev.continueintellijextension.auth.AuthListener
+import com.github.continuedev.continueintellijextension.auth.ContinueAuthService
 import com.github.continuedev.continueintellijextension.constants.*
 import com.github.continuedev.continueintellijextension.services.ContinueExtensionSettings
 import com.github.continuedev.continueintellijextension.services.ContinuePluginService
@@ -232,8 +234,27 @@ class IdeProtocolClient (
                         respond(mapOf(
                             "remoteConfigServerUrl" to settings.continueState.remoteConfigServerUrl,
                             "remoteConfigSyncPeriod" to settings.continueState.remoteConfigSyncPeriod,
-                            "userToken" to settings.continueState.userToken
+                            "userToken" to settings.continueState.userToken,
+                            "enableControlServerBeta" to settings.continueState.enableContinueTeamsBeta
                         ))
+                    }
+                    "getControlPlaneSessionInfo" -> {
+                        val silent = (data as? Map<String, Any>)?.get("silent") as? Boolean ?: false
+
+                        val authService = service<ContinueAuthService>()
+                        if (silent) {
+                            val sessionInfo = authService.loadControlPlaneSessionInfo()
+                            respond(sessionInfo)
+                        } else {
+                            authService.startAuthFlow(project)
+                            respond(null)
+                        }
+                    }
+                    "logoutOfControlPlane" -> {
+                        val authService = service<ContinueAuthService>()
+                        authService.signOut()
+                        ApplicationManager.getApplication().messageBus.syncPublisher(AuthListener.TOPIC).handleUpdatedSessionInfo(null)
+                        respond(null)
                     }
                     "getIdeInfo" -> {
                         val applicationInfo = ApplicationInfo.getInstance()
@@ -306,10 +327,6 @@ class IdeProtocolClient (
                         val between = fullContents.split("\n").slice(startLine + 1 until endLine).joinToString("\n")
 
                         respond(firstLine + "\n" + between + "\n" + lastLine)
-                    }
-
-                    "listWorkspaceContents" -> {
-                        respond(listDirectoryContents(null))
                     }
 
                     "getWorkspaceDirs" -> {
@@ -544,6 +561,11 @@ class IdeProtocolClient (
                         file.writeText(msg["contents"] as String)
                         respond(null);
                     }
+                    "fileExists" -> {
+                        val msg = data as Map<String, String>;
+                        val file = File(msg["filepath"])
+                        respond(file.exists())
+                    }
                     "getContinueDir" -> {
                         respond(getContinueGlobalPath())
                     }
@@ -626,6 +648,9 @@ class IdeProtocolClient (
                         val url = data as String
                         java.awt.Desktop.getDesktop().browse(java.net.URI(url))
                         respond(null)
+                    }
+                    "pathSep" -> {
+                        respond(File.separator)
                     }
                     else -> {
                         println("Unknown messageType: $messageType")

@@ -241,11 +241,15 @@ const exe = os === "win32" ? ".exe" : "";
     );
   });
 
-  fs.copyFileSync(
-    path.join(__dirname, "../../../core/vendor/tree-sitter.wasm"),
-    path.join(__dirname, "../out/tree-sitter.wasm"),
-  );
-  console.log("[info] Copied tree-sitter wasms");
+  const filesToCopy = [
+    "../../../core/vendor/tree-sitter.wasm",
+    "../../../core/llm/llamaTokenizerWorkerPool.mjs",
+    "../../../core/llm/llamaTokenizer.mjs",
+  ];
+  for (const f of filesToCopy) {
+    fs.copyFileSync(path.join(__dirname, f), path.join(__dirname, "..", "out", path.basename(f)));
+    console.log(`[info] Copied ${path.basename(f)}`);
+  }
 
   // tree-sitter tag query files
   // ncp(
@@ -427,12 +431,30 @@ const exe = os === "win32" ? ".exe" : "";
     );
   });
 
+  // Copied here as well for the VS Code test suite
+  await new Promise((resolve, reject) => {
+    ncp(
+      path.join(__dirname, "../../../core/node_modules/sqlite3/build"),
+      path.join(__dirname, "../out"),
+      { dereference: true },
+      (error) => {
+        if (error) {
+          console.warn("[error] Error copying sqlite3 files", error);
+          reject(error);
+        } else {
+          resolve();
+        }
+      },
+    );
+  });
+
   // Copy node_modules for pre-built binaries
   const NODE_MODULES_TO_COPY = [
     "esbuild",
     "@esbuild",
     "@lancedb",
     "@vscode/ripgrep",
+    "workerpool",
   ];
   fs.mkdirSync("out/node_modules", { recursive: true });
 
@@ -470,7 +492,7 @@ const exe = os === "win32" ? ".exe" : "";
   // Validate the all of the necessary files are present
   validateFilesPresent([
     // Queries used to create the index for @code context provider
-    "tree-sitter/code-snippet-queries/tree-sitter-c_sharp-tags.scm",
+    "tree-sitter/code-snippet-queries/c_sharp.scm",
 
     // Queries used for @outline and @highlights context providers
     "tag-qry/tree-sitter-c_sharp-tags.scm",

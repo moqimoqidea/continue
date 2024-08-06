@@ -1,6 +1,6 @@
-import { IDE } from "..";
-import { ToIdeFromWebviewOrCoreProtocol } from "../protocol/ide";
-import { Message } from "./messenger";
+import { IDE } from "../index.js";
+import { ToIdeFromWebviewOrCoreProtocol } from "../protocol/ide.js";
+import { Message } from "./messenger.js";
 
 export class ReverseMessageIde {
   private on<T extends keyof ToIdeFromWebviewOrCoreProtocol>(
@@ -112,10 +112,6 @@ export class ReverseMessageIde {
       return this.ide.getTerminalContents();
     });
 
-    this.on("listWorkspaceContents", (data) => {
-      return this.ide.listWorkspaceContents(data.directory, data.useGitIgnore);
-    });
-
     this.on("getWorkspaceDirs", () => {
       return this.ide.getWorkspaceDirs();
     });
@@ -134,6 +130,10 @@ export class ReverseMessageIde {
 
     this.on("writeFile", (data) => {
       return this.ide.writeFile(data.path, data.contents);
+    });
+
+    this.on("fileExists", (data) => {
+      return this.ide.fileExists(data.filepath);
     });
 
     this.on("showVirtualFile", (data) => {
@@ -186,6 +186,9 @@ export class ReverseMessageIde {
 
     this.on("getBranch", (data) => {
       return this.ide.getBranch(data.dir);
+    });
+    this.on("pathSep", (data) => {
+      return this.ide.pathSep();
     });
   }
 }

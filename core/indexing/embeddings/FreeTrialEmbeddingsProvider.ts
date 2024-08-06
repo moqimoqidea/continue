@@ -1,11 +1,16 @@
 import { Response } from "node-fetch";
 import { getHeaders } from "../../continueServer/stubs/headers.js";
 import { constants } from "../../deploy/constants.js";
-import { EmbedOptions, FetchFunction } from "../../index.js";
+import {
+  EmbeddingsProviderName,
+  EmbedOptions,
+  FetchFunction,
+} from "../../index.js";
 import { withExponentialBackoff } from "../../util/withExponentialBackoff.js";
 import BaseEmbeddingsProvider from "./BaseEmbeddingsProvider.js";
 
 class FreeTrialEmbeddingsProvider extends BaseEmbeddingsProvider {
+  static providerName: EmbeddingsProviderName = "free-trial";
   static maxBatchSize = 128;
 
   static defaultOptions: Partial<EmbedOptions> | undefined = {
@@ -15,7 +20,7 @@ class FreeTrialEmbeddingsProvider extends BaseEmbeddingsProvider {
   constructor(options: EmbedOptions, fetch: FetchFunction) {
     super(options, fetch);
     this.options.model = FreeTrialEmbeddingsProvider.defaultOptions?.model;
-    this.id = this.options.model || this.constructor.name;
+    this.id = `${this.constructor.name}::${this.options.model}`;
   }
 
   async embed(chunks: string[]) {
@@ -32,6 +37,9 @@ class FreeTrialEmbeddingsProvider extends BaseEmbeddingsProvider {
     return (
       await Promise.all(
         batchedChunks.map(async (batch) => {
+          if (batch.length === 0) {
+            return [];
+          }
           const fetchWithBackoff = () =>
             withExponentialBackoff<Response>(async () =>
               this.fetch(new URL("embeddings", constants.a), {

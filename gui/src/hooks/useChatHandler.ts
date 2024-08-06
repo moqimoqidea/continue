@@ -12,7 +12,7 @@ import {
   SlashCommandDescription,
 } from "core";
 import { constructMessages } from "core/llm/constructMessages";
-import { stripImages } from "core/llm/countTokens";
+import { stripImages } from "core/llm/images";
 import { getBasename, getRelativePath } from "core/util";
 import { usePostHog } from "posthog-js/react";
 import { useEffect, useRef } from "react";
@@ -120,6 +120,13 @@ function useChatHandler(dispatch: Dispatch, ideMessenger: IIdeMessenger) {
     const cancelToken = abortController.signal;
     const modelTitle = defaultModel.title;
 
+    const checkActiveInterval = setInterval(() => {
+      if (!activeRef.current) {
+        abortController.abort();
+        clearInterval(checkActiveInterval);
+      }
+    }, 100);
+
     for await (const update of ideMessenger.streamRequest(
       "command/run",
       {
@@ -142,6 +149,7 @@ function useChatHandler(dispatch: Dispatch, ideMessenger: IIdeMessenger) {
         dispatch(streamUpdate(update));
       }
     }
+    clearInterval(checkActiveInterval);
   }
 
   async function streamResponse(

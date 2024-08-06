@@ -4,13 +4,18 @@ import {
   CompletionProvider,
   type AutocompleteInput,
 } from "core/autocomplete/completionProvider";
-import type { ConfigHandler } from "core/config/handler";
+import { ConfigHandler } from "core/config/ConfigHandler";
 import { v4 as uuidv4 } from "uuid";
 import * as vscode from "vscode";
 import type { TabAutocompleteModel } from "../util/loadAutocompleteModel";
 import { getDefinitionsFromLsp } from "./lsp";
 import { RecentlyEditedTracker } from "./recentlyEdited";
-import { setupStatusBar, stopStatusBarLoading } from "./statusBar";
+import {
+  StatusBarStatus,
+  getStatusBarStatus,
+  setupStatusBar,
+  stopStatusBarLoading,
+} from "./statusBar";
 
 interface VsCodeCompletionInput {
   document: vscode.TextDocument;
@@ -30,7 +35,7 @@ export class ContinueCompletionProvider
       if (val === "Documentation") {
         vscode.env.openExternal(
           vscode.Uri.parse(
-            "https://docs.continue.dev/walkthroughs/tab-autocomplete",
+            "https://docs.continue.dev/features/tab-autocomplete",
           ),
         );
       } else if (val === "Download Ollama") {
@@ -74,9 +79,7 @@ export class ContinueCompletionProvider
     //@ts-ignore
   ): ProviderResult<InlineCompletionItem[] | InlineCompletionList> {
     const enableTabAutocomplete =
-      vscode.workspace
-        .getConfiguration("continue")
-        .get<boolean>("enableTabAutocomplete") || false;
+      getStatusBarStatus() === StatusBarStatus.Enabled;
     if (token.isCancellationRequested || !enableTabAutocomplete) {
       return null;
     }
@@ -195,7 +198,7 @@ export class ContinueCompletionProvider
         injectDetails,
       };
 
-      setupStatusBar(true, true);
+      setupStatusBar(undefined, true);
       const outcome =
         await this.completionProvider.provideInlineCompletionItems(
           input,
